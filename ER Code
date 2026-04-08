@@ -1,0 +1,429 @@
+
+Enum consult_type {
+  regular
+  online
+}
+
+Enum visit_type {
+  first_time
+  report
+  follow_up
+}
+
+Enum appointment_status {
+  pending       
+  waiting       
+  consulted     
+  unable_to_meet
+  rescheduled
+  cancelled
+}
+
+Enum cancel_initiated_by {
+  patient
+  doctor
+}
+
+Enum notification_type {
+  appointment_reminder
+  doctor_reschedule
+  appointment_confirmed
+  payment_received
+  reengagement
+  google_review_request
+  co_patient_invite
+}
+
+Enum support_ticket_status {
+  open
+  resolved
+}
+
+Enum payment_status {
+  pending
+  paid
+  refunded
+  failed
+}
+
+Enum sender_role {
+  patient
+  doctor
+}
+
+
+Table users {
+  user_id    integer     [primary key, increment, note: 'Internal surrogate PK']
+  mobile_number varchar(15) [unique, not null, note: 'Used for OTP sign-in']
+  name       varchar(120)
+  email      varchar(180)
+  created_at timestamp   [default: `now()`]
+  is_active  boolean     [default: true]
+
+  indexes {
+    mobile_number [unique, name: 'uq_users_mobile']
+  }
+
+  Note: 'Registered patients. Auth is mobile-OTP only (screen 1).'
+}
+
+Records users(user_id, mobile_number, name, email, created_at, is_active) {
+  1, '+919876543210', 'Muthukumar',  'muthu@example.com',  '2025-01-10 09:00:00', true
+  2, '+919876500001', 'Meena',       'meena@example.com',  '2025-01-15 10:30:00', true
+  3, '+919876500002', 'Kishore',     'kishore@example.com','2025-02-01 08:00:00', true
+}
+
+
+Table family_members {
+  member_id    integer     [primary key, increment]
+  user_id      integer     [not null]
+  name         varchar(120) [not null]
+  age          integer
+  sex          varchar(10)
+  weight_kg    decimal(5,2)
+  relationship varchar(50) [note: 'self | spouse | child | parent | sibling | other']
+  is_self      boolean     [default: false, note: 'True for the account holder']
+  created_at   timestamp   [default: `now()`]
+
+  indexes {
+    user_id [name: 'idx_family_members_user']
+  }
+
+  Note: 'Dependants managed under one user account (screen 24).'
+}
+
+Records family_members(member_id, user_id, name, age, sex, weight_kg, relationship, is_self) {
+  1, 1, 'Muthukumar', 28, 'Male',   72.0, 'self',   true
+  2, 1, 'Meena',      26, 'Female', 55.0, 'spouse', false
+  3, 1, 'Kishore',     2, 'Male',   12.5, 'child',  false
+}
+
+
+Table doctors {
+  doctor_id          integer      [primary key, increment]
+  name               varchar(120) [not null]
+  specialization     varchar(120) [not null, note: 'e.g. Gynaecologist']
+  years_experience   integer
+  qualifications     varchar(255) [note: 'e.g. Gold Medalist, MBBS, MD']
+  profile_photo_url  text
+  google_business_url text        [note: 'Used for Google Review redirect (screen 25)']
+  is_active          boolean      [default: true]
+  created_at         timestamp    [default: `now()`]
+
+  Note: 'Doctor catalogue shown on search screen (screen 2).'
+}
+
+Records doctors(doctor_id, name, specialization, years_experience, qualifications, is_active) {
+  1, 'Dr. Lavangi', 'Gynaecologist', 15, 'MBBS, MD, Gold Medalist', true
+  2, 'Dr. Kumar',   'Paediatrician', 10, 'MBBS, DNB',              true
+  3, 'Dr. Elango',  'General Physician', 8, 'MBBS, FCGP',          true
+}
+
+
+Table doctor_services {
+  service_id   integer     [primary key, increment]
+  doctor_id    integer     [not null]
+  service_name varchar(120) [not null, note: 'e.g. Pregnancy, New born, New mother']
+
+  indexes {
+    doctor_id [name: 'idx_doctor_services_doctor']
+  }
+
+  Note: 'Services listed on doctor profile page (screen 3).'
+}
+
+Records doctor_services(service_id, doctor_id, service_name) {
+  1, 1, 'Pregnancy care'
+  2, 1, 'New born care'
+  3, 1, 'New mother care'
+  4, 2, 'Neonatal care'
+  5, 2, 'Child vaccination'
+}
+
+
+Table availability_slots {
+  slot_id     integer     [primary key, increment]
+  doctor_id   integer     [not null]
+  day_of_week varchar(10) [not null, note: 'monday | tuesday | ... | sunday']
+  start_time  time        [not null]
+  end_time    time        [not null]
+  consult_type consult_type [default: 'regular', note: 'Slot may be online-only']
+  is_active   boolean     [default: true]
+
+  indexes {
+    (doctor_id, day_of_week) [name: 'idx_avail_doctor_day']
+  }
+
+  Note: 'Recurring weekly availability (screen 3). Appointment time derived from slot + chosen date.'
+}
+
+Records availability_slots(slot_id, doctor_id, day_of_week, start_time, end_time, consult_type) {
+  1, 1, 'monday',    '10:00', '13:00', 'regular'
+  2, 1, 'tuesday',   '10:00', '13:00', 'regular'
+  3, 1, 'wednesday', '10:00', '13:00', 'regular'
+  4, 1, 'thursday',  '10:00', '13:00', 'regular'
+  5, 1, 'friday',    '10:00', '13:00', 'regular'
+  6, 1, 'saturday',  '14:00', '17:00', 'regular'
+  7, 2, 'monday',    '09:00', '12:00', 'regular'
+  8, 2, 'wednesday', '18:00', '20:00', 'online'
+}
+
+
+Table appointments {
+  appointment_id      integer     [primary key, increment]
+  user_id             integer     [not null,note: 'Account holder who booked']
+  doctor_id           integer     [not null]
+  member_id           integer     [not null,note: 'The actual patient (self or family)']
+  slot_id             integer     [not null]
+
+  appointment_date    date        [not null]
+  scheduled_time      time        [not null, note: 'Assigned time within the slot']
+  token_number        integer     [not null, note: 'e.g. #14 shown on confirmation (screen 7)']
+
+  consult_type        consult_type [default: 'regular']
+  visit_type          visit_type   [default: 'first_time']
+  status              appointment_status [default: 'pending']
+  cancel_initiated_by cancel_initiated_by
+
+  ivr_app_id          varchar(50) [note: 'For seamless IVR-to-app handoff (screen 21)']
+  is_family_booking   boolean     [default: false,note: 'Booked via Family Appointment flow (screen 11)']
+
+  booked_at           timestamp   [default: `now()`]
+  cancelled_at        timestamp
+  rescheduled_from    integer     [note: 'Self-ref: tracks reschedule chain (screen 16)']
+
+  indexes {
+    (doctor_id, appointment_date, status) [name: 'idx_appt_doctor_date_status']
+    (user_id, status)                     [name: 'idx_appt_user_status']
+    token_number                          [name: 'idx_appt_token']
+  }
+
+  Note: 'Core booking entity. Status lifecycle: pending→waiting→consulted/cancelled/rescheduled.'
+}
+
+Records appointments(appointment_id, user_id, doctor_id, member_id, slot_id, appointment_date, scheduled_time, token_number, consult_type, visit_type, status) {
+  1, 1, 1, 2, 1, '2023-10-07', '20:00', 47, 'regular', 'first_time', 'consulted'
+  2, 1, 2, 1, 7, '2023-10-08', '11:00', 12, 'regular', 'follow_up',  'pending'
+  3, 1, 1, 3, 1, '2023-10-02', '10:15', 14, 'regular', 'first_time', 'waiting'
+}
+
+
+Table patient_details {
+  detail_id       integer     [primary key, increment]
+  appointment_id  integer     [unique, not null,note: 'One-to-one: each appointment has at most one detail row']
+  complaint       varchar(255) [not null, note: 'e.g. Stomach pain (screen 11)']
+  weight_at_booking decimal(5,2) [note: 'Patient weight recorded at time of booking']
+  notes           text        [note: 'Free-text additional symptoms']
+  added_at        timestamp   [default: `now()`]
+
+  Note: 'Captured via "Add patient details" flow after booking confirmation (screen 10).'
+}
+
+Records patient_details(detail_id, appointment_id, complaint, weight_at_booking) {
+  1, 1, 'Stomach pain', 55.0
+  2, 2, 'Knee pain',    72.0
+  3, 3, 'Fever',        12.5
+}
+
+
+Table payments {
+  payment_id      integer     [primary key, increment]
+  appointment_id  integer     [unique, not null,note: 'One payment record per appointment']
+  amount          decimal(10,2) [not null]
+  currency        char(3)     [default: 'INR']
+  status          payment_status [default: 'pending']
+  payment_method  varchar(50) [note: 'upi | card | netbanking | wallet']
+  transaction_ref varchar(120) [note: 'Gateway transaction ID']
+  paid_at         timestamp
+  refunded        boolean     [default: false]
+  refunded_at     timestamp   [note: 'Refund SLA: 2 days when doctor cancels (screen 19)']
+  refund_reason   varchar(255)
+
+  indexes {
+    status [name: 'idx_payments_status']
+  }
+
+  Note: 'Upfront payment reduces wait time (screen 11). Refund triggered on doctor cancellation (screen 19).'
+}
+
+Records payments(payment_id, appointment_id, amount, currency, status, payment_method, paid_at) {
+  1, 1, 500.00, 'INR', 'paid',    'upi', '2023-10-06 18:30:00'
+  2, 2, 500.00, 'INR', 'pending', null,   null
+  3, 3, 500.00, 'INR', 'pending', null,   null
+}
+
+
+Table chat_messages {
+  message_id      integer     [primary key, increment]
+  appointment_id  integer     [not null]
+  sender_role     sender_role [not null]
+  content         text        [not null]
+  sent_at         timestamp   [default: `now()`]
+
+  indexes {
+    (appointment_id, sent_at) [name: 'idx_chat_appt_time']
+  }
+
+  Note: 'Pre-consultation chat thread between patient and doctor (screen 12).'
+}
+
+Records chat_messages(message_id, appointment_id, sender_role, content, sent_at) {
+  1, 1, 'patient', 'Stomach pain since yesterday evening',             '2023-10-07 19:45:00'
+  2, 1, 'doctor',  'Place a warm compress on your stomach and rest.',  '2023-10-07 19:50:00'
+}
+
+
+Table feedback {
+  feedback_id         integer   [primary key, increment]
+  appointment_id      integer   [unique, not null]
+  consulting_rating   integer   [note: '1–5 stars for doctor consulting quality']
+  clinic_rating       integer   [note: '1–5 stars for hospital / clinic experience']
+  waiting_time_rating integer   [note: '1–5 stars for waiting time']
+  submitted_at        timestamp [default: `now()`]
+
+  Note: 'Post-consultation three-axis rating shown on screen 17.'
+}
+
+Records feedback(feedback_id, appointment_id, consulting_rating, clinic_rating, waiting_time_rating, submitted_at) {
+  1, 1, 4,    4,    4,    '2023-10-07 21:00:00'
+  2, 2, null, null, null, null
+  3, 3, null, null, null, null
+}
+
+
+Table notifications {
+  notification_id integer     [primary key, increment]
+  user_id         integer     [not null]
+  appointment_id  integer     [note: 'Nullable: some notifications are account-level']
+  type            notification_type [not null]
+  message         text        [not null]
+  is_read         boolean     [default: false]
+  created_at      timestamp   [default: `now()`]
+
+  indexes {
+    (user_id, is_read) [name: 'idx_notif_user_unread']
+  }
+
+  Note: 'Push notifications: reminders (screen 18), doctor reschedule alerts (screen 19), reengagement (screen 20).'
+}
+
+Records notifications(notification_id, user_id, appointment_id, type, message, is_read, created_at) {
+  1, 1, 3, 'appointment_reminder',  'You have an appointment with Dr. Lavangi at 10 AM today for Muthukumar', false, '2023-10-02 09:00:00'
+  2, 1, 2, 'appointment_reminder',  'You have an appointment with Dr. Kumar tomorrow at 11 AM', false, '2023-10-07 08:00:00'
+  3, 1, 1, 'doctor_reschedule',     'Your appointment with Dr. Lavangi has been cancelled. Refund in 2 days.', false, '2023-10-06 17:00:00'
+}
+
+
+Table reengagements {
+  reengagement_id  integer     [primary key, increment]
+  appointment_id   integer     [unique, not null,note: 'One follow-up per completed appointment']
+  patient_response varchar(30) [note: 'feeling_better | no_improvement']
+  patient_note     text        [note: 'Free-text from patient (screen 20)']
+  doctor_notified  boolean     [default: false]
+  responded_at     timestamp
+
+  Note: 'Sent 1 day after a consulted appointment. Doctor is alerted on no_improvement (screen 20).'
+}
+
+Records reengagements(reengagement_id, appointment_id, patient_response, patient_note, doctor_notified, responded_at) {
+  1, 1, 'no_improvement', 'Took the prescribed medicines, still no improvement', true,  '2023-10-08 10:00:00'
+  2, 2, null,              null,                                                  false, null
+  3, 3, null,              null,                                                  false, null
+}
+
+
+Table co_patient_groups {
+  group_id   integer     [primary key, increment]
+  doctor_id  integer     [not null]
+  category   varchar(120) [not null, note: 'e.g. new mothers, antenatal']
+  created_at timestamp   [default: `now()`]
+
+  indexes {
+    doctor_id [name: 'idx_cogroup_doctor']
+  }
+
+  Note: 'Peer support groups for patients of the same doctor/category (screen 22).'
+}
+
+Table co_patient_members {
+  co_member_id integer   [primary key, increment]
+  group_id     integer   [not null]
+  user_id      integer   [not null]
+  joined_at    timestamp [default: `now()`]
+
+  indexes {
+    (group_id, user_id) [unique, name: 'uq_copatient_group_user']
+  }
+
+  Note: 'Many-to-many join: a user can be in multiple groups.'
+}
+
+Records co_patient_groups(group_id, doctor_id, category, created_at) {
+  1, 1, 'new mothers',   '2025-01-01 00:00:00'
+  2, 2, 'antenatal care','2025-02-01 00:00:00'
+}
+
+Records co_patient_members(co_member_id, group_id, user_id, joined_at) {
+  1, 1, 2, '2025-03-01 09:00:00'
+  2, 1, 3, '2025-03-05 11:00:00'
+}
+
+
+Table support_tickets {
+  ticket_id   integer     [primary key, increment]
+  user_id     integer     [not null]
+  subject     varchar(255) [not null]
+  description text
+  status      support_ticket_status [default: 'open']
+  created_at  timestamp   [default: `now()`]
+  resolved_at timestamp
+
+  indexes {
+    (user_id, status) [name: 'idx_support_user_status']
+  }
+
+  Note: 'In-app customer support tickets with Open / Resolved tabs (screen 23).'
+}
+
+Records support_tickets(ticket_id, user_id, subject, status, created_at) {
+  1, 1, 'Payment deducted but appointment not confirmed', 'open',     '2025-04-01 10:00:00'
+  2, 2, 'Unable to reschedule appointment',              'resolved',  '2025-03-15 14:00:00'
+}
+
+Ref fk_family_user:family_members.user_id > users.user_id
+
+Ref fk_appt_user:appointments.user_id > users.user_id
+
+Ref fk_appt_member:appointments.member_id > family_members.member_id
+
+Ref fk_appt_doctor:appointments.doctor_id > doctors.doctor_id
+
+Ref fk_appt_slot:appointments.slot_id > availability_slots.slot_id
+
+Ref fk_appt_reschedule:appointments.rescheduled_from > appointments.appointment_id
+
+Ref fk_slot_doctor:availability_slots.doctor_id > doctors.doctor_id
+
+Ref fk_service_doctor:doctor_services.doctor_id > doctors.doctor_id
+
+Ref fk_detail_appt:patient_details.appointment_id - appointments.appointment_id
+
+Ref fk_payment_appt:payments.appointment_id - appointments.appointment_id
+
+Ref fk_chat_appt:chat_messages.appointment_id > appointments.appointment_id
+
+Ref fk_feedback_appt:feedback.appointment_id - appointments.appointment_id
+
+Ref fk_notif_user:notifications.user_id > users.user_id
+
+Ref fk_notif_appt: notifications.appointment_id > appointments.appointment_id
+
+Ref fk_reeng_appt:reengagements.appointment_id - appointments.appointment_id
+
+Ref fk_cogroup_doctor:co_patient_groups.doctor_id > doctors.doctor_id
+
+Ref fk_comember_group:co_patient_members.group_id > co_patient_groups.group_id
+
+Ref fk_comember_user:co_patient_members.user_id > users.user_id
+
+Ref fk_ticket_user:support_tickets.user_id > users.user_id
